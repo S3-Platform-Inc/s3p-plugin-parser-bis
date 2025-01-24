@@ -1,8 +1,10 @@
 import datetime
 import time
 
+from s3p_sdk.exceptions.parser import S3PPluginParserOutOfRestrictionException, S3PPluginParserFinish
 from s3p_sdk.plugin.payloads.parsers import S3PParserBase
-from s3p_sdk.types import S3PRefer, S3PDocument
+from s3p_sdk.types import S3PRefer, S3PDocument, S3PPlugin, S3PPluginRestrictions
+from s3p_sdk.types.plugin_restrictions import FROM_DATE
 from selenium.common import NoSuchElementException
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
@@ -28,9 +30,8 @@ class BIS(S3PParserBase):
     url_template = f'{HOST}/research/index.htm?bis_fsi_publs_page='
     date_begin = datetime.datetime(2019, 1, 1)
 
-    def __init__(self, refer: S3PRefer, web_driver: WebDriver, max_count_documents: int = None,
-                 last_document: S3PDocument = None):
-        super().__init__(refer, max_count_documents, last_document)
+    def __init__(self, refer: S3PRefer, plugin: S3PPlugin, restrictions: S3PPluginRestrictions, web_driver: WebDriver):
+        super().__init__(refer, plugin, restrictions)
 
         # Тут должны быть инициализированы свойства, характерные для этого парсера. Например: WebDriver
         self._driver = web_driver
@@ -96,78 +97,81 @@ class BIS(S3PParserBase):
                 doc_type = (div_pdf_info.split('|'))[0]
             else:
                 doc_type = div_pdf_info
-            print(f"Тип документа: {doc_type}")
             abstract = ""
             autor = ""
-            print(f"Название: {title}")
             source = (link.find('div', class_="title")).find('a').get('href')
             date_info = link.find('td', class_="item_date").get_text(strip=True)
             official_date = datetime.datetime.strptime(date_info, '%d %b %Y')
-            if official_date > self.date_begin:
-                web_link: str = self.HOST + source
-                try:
-                    if ".pdf" not in source:
-                        doc_page = requests.get(web_link)
-                        new_soup = BeautifulSoup(doc_page.content.decode('utf-8'), 'html.parser')
-                        interval_source = new_soup.find('a', class_="pdftitle_link")
-                        div_autor = new_soup.find("div", class_="authorline")
-                        if div_autor:
-                            autor = (self.get_text_from_div(div_autor)).replace('\n', ' ').replace('\t', ' ').replace(
-                                "¶",
-                                " ").replace(
-                                "▲",
-                                " ").replace(
-                                '\xa0', ' ').replace('\r', ' ').replace('—', "-").replace("’", "'").replace("“",
-                                                                                                            '"').replace(
-                                "”", '"').replace(" ", " ").replace("<", "_").replace(">", "_").replace(":",
-                                                                                                        "_").replace(
-                                '"', "_").replace("/",
-                                                  "_").replace(
-                                "\\", "_").replace("|", "_").replace("?", "_").replace("*", "_")
-                        div_cms_content = new_soup.find("div", id="cmsContent")
-                        if div_cms_content:
-                            abstract = (self.get_text_from_div(div_cms_content)).replace('\n', ' ').replace('\t',
-                                                                                                            ' ').replace(
-                                "¶", " ").replace("▲",
-                                                  " ").replace(
-                                '\xa0', ' ').replace('\r', ' ').replace('—', "-").replace("’", "'").replace("“",
-                                                                                                            '"').replace(
-                                "”", '"').replace(" ", " ").replace("<", "_").replace(">", "_").replace(":",
-                                                                                                        "_").replace(
-                                '"', "_").replace("/",
-                                                  "_").replace(
-                                "\\", "_").replace("|", "_").replace("?", "_").replace("*", "_")
-                        while "  " in abstract:
-                            abstract = abstract.replace("  ", " ")
-                        while "  " in autor:
-                            autor = autor.replace("  ", " ")
 
-                        if interval_source is not None:
-                            source_link = interval_source.get('href')
-                            web_link = f"{self.HOST}{source_link}"
+            web_link: str = self.HOST + source
+            try:
+                if ".pdf" not in source:
+                    doc_page = requests.get(web_link)
+                    new_soup = BeautifulSoup(doc_page.content.decode('utf-8'), 'html.parser')
+                    interval_source = new_soup.find('a', class_="pdftitle_link")
+                    div_autor = new_soup.find("div", class_="authorline")
+                    if div_autor:
+                        autor = (self.get_text_from_div(div_autor)).replace('\n', ' ').replace('\t', ' ').replace(
+                            "¶",
+                            " ").replace(
+                            "▲",
+                            " ").replace(
+                            '\xa0', ' ').replace('\r', ' ').replace('—', "-").replace("’", "'").replace("“",
+                                                                                                        '"').replace(
+                            "”", '"').replace(" ", " ").replace("<", "_").replace(">", "_").replace(":",
+                                                                                                    "_").replace(
+                            '"', "_").replace("/",
+                                              "_").replace(
+                            "\\", "_").replace("|", "_").replace("?", "_").replace("*", "_")
+                    div_cms_content = new_soup.find("div", id="cmsContent")
+                    if div_cms_content:
+                        abstract = (self.get_text_from_div(div_cms_content)).replace('\n', ' ').replace('\t',
+                                                                                                        ' ').replace(
+                            "¶", " ").replace("▲",
+                                              " ").replace(
+                            '\xa0', ' ').replace('\r', ' ').replace('—', "-").replace("’", "'").replace("“",
+                                                                                                        '"').replace(
+                            "”", '"').replace(" ", " ").replace("<", "_").replace(">", "_").replace(":",
+                                                                                                    "_").replace(
+                            '"', "_").replace("/",
+                                              "_").replace(
+                            "\\", "_").replace("|", "_").replace("?", "_").replace("*", "_")
+                    while "  " in abstract:
+                        abstract = abstract.replace("  ", " ")
+                    while "  " in autor:
+                        autor = autor.replace("  ", " ")
 
-                        else:
-                            self.logger.debug(f'Для {self.HOST}{source} не получилось найти ссылку на документ')
-                except:
-                    self.logger.error(f'Ошибка парсинга')
-                else:
-                    document = S3PDocument(
-                        id=None,
-                        title=title,
-                        abstract=abstract if abstract else None,
-                        text=None,
-                        link=web_link,
-                        storage=None,
-                        other=None,
-                        published=official_date,
-                        loaded=datetime.datetime.now(),
-                    )
-                    if autor:
-                        document.other_data = {'author': autor}
-                    self._find(document)
+                    if interval_source is not None:
+                        source_link = interval_source.get('href')
+                        web_link = f"{self.HOST}{source_link}"
+
+                    else:
+                        self.logger.debug(f'Для {self.HOST}{source} не получилось найти ссылку на документ')
+            except:
+                self.logger.error(f'Ошибка парсинга')
             else:
-                return False
+                document = S3PDocument(
+                    id=None,
+                    title=title,
+                    abstract=abstract if abstract else None,
+                    text=None,
+                    link=web_link,
+                    storage=None,
+                    other=None,
+                    published=official_date,
+                    loaded=datetime.datetime.now(),
+                )
+                if autor:
+                    document.other_data = {'author': autor}
 
+                try:
+                    self._find(document)
+                except S3PPluginParserOutOfRestrictionException as e:
+                    if e.restriction == FROM_DATE:
+                        self.logger.debug(f'Document is out of date range `{self._restriction.from_date}`')
+                        raise S3PPluginParserFinish(self._plugin,
+                                                    f'Document is out of date range `{self._restriction.from_date}`',
+                                                    e)
         return True
 
 
